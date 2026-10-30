@@ -110,15 +110,23 @@ def probe_open_data(dataset_id, workdir, log=print):
     cmd = ["curl", "-sS", "--fail", "-L", "-A", UA, "-m", "60",
            "--connect-timeout", "30", "--range", "0-0", "-D", hdr,
            "-o", body, "-w", "%{http_code} %{size_download}", _quote_url(url)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise FetchError(f"檢查 #{dataset_id} 更新時間失敗：{r.stderr.strip()}")
+    # DNS、SSL 握手與來源站暫時錯誤可恢復；最多嘗試三次，持續失敗仍回報錯誤。
+    transient_codes = {5, 6, 7, 18, 22, 28, 35, 52, 55, 56}
     try:
+        for attempt in range(1, 4):
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode == 0:
+                break
+            if attempt == 3 or r.returncode not in transient_codes:
+                raise FetchError(f"檢查 #{dataset_id} 更新時間失敗（已嘗試 {attempt} 次）：{r.stderr.strip()}")
+            log(f"  #{dataset_id} 第 {attempt} 次連線失敗，稍後重試：{r.stderr.strip()}")
+            time.sleep(10 * attempt)
         status, size = r.stdout.split()
         modified = None
-        for line in open(hdr, encoding="latin-1"):
-            if line.lower().startswith("last-modified:"):
-                modified = line.split(":", 1)[1].strip()
+        with open(hdr, encoding="latin-1") as headers:
+            for line in headers:
+                if line.lower().startswith("last-modified:"):
+                    modified = line.split(":", 1)[1].strip()
         # Only a 206 response with a usable timestamp is a reliable shortcut.
         # If the server ignores Range or omits Last-Modified, caller downloads normally.
         usable = status == "206" and int(float(size)) <= 1 and bool(modified)

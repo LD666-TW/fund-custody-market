@@ -36,6 +36,9 @@ jobs:
       - name: 取出程式與現有資料
         uses: actions/checkout@v4
 
+      - name: 驗證網路重試與失敗處理
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
       - name: 檢查／下載／合併／自動檢查
         id: build
         env:
